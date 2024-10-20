@@ -5,35 +5,29 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Settings, LogOut, Upload } from "lucide-react"
-import { supabase } from '@/lib/supabase'
+import { Settings, LogOut } from "lucide-react"
 import { useRouter } from 'next/navigation'
-import { useToast } from "@/components/ui/use-toast"
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { useToast } from "@/components/ui/usetoast"
+
+const supabase = createClientComponentClient()
 
 export default function ProfilPage() {
-  const { toast } = useToast()
-  const [userId, setUserId] = useState<string | null>(null)
-  const [name, setName] = useState("")
-  const [email, setEmail] = useState("")
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
-  const [points, setPoints] = useState(0)
+  const [name, setName] = useState("Max Mustermann")
+  const [email, setEmail] = useState("max@example.com")
+  const [avatarUrl, setAvatarUrl] = useState("/placeholder.svg?height=80&width=80")
+  const [points, setPoints] = useState(150)
   const [isEditing, setIsEditing] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
-  const [isSaving, setIsSaving] = useState(false)
+  const [nameError, setNameError] = useState("")
   const router = useRouter()
+  const { toast } = useToast()
 
   useEffect(() => {
-    getProfile()
-  }, [])
-
-  async function getProfile() {
-    try {
+    const fetchProfile = async () => {
       setIsLoading(true)
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
-        setUserId(user.id)
-        setEmail(user.email || "")
-
         const { data, error } = await supabase
           .from('profiles')
           .select('name, avatar_url, points')
@@ -41,127 +35,114 @@ export default function ProfilPage() {
           .single()
 
         if (error) {
-          throw error
-        }
-
-        if (data) {
+          toast({
+            title: "Fehler",
+            description: "Profil konnte nicht geladen werden.",
+            variant: "destructive",
+          })
+        } else if (data) {
           setName(data.name || "")
-          setAvatarUrl(data.avatar_url)
+          setAvatarUrl(data.avatar_url || "/placeholder.svg?height=80&width=80")
           setPoints(data.points || 0)
+          setEmail(user.email || "")
         }
+      } else {
+        router.push('/login')
       }
-    } catch (error) {
-      console.error('Fehler beim Laden des Profils', error)
-      toast({
-        title: "Fehler",
-        description: "Profil konnte nicht geladen werden.",
-        variant: "destructive",
-      })
-    } finally {
       setIsLoading(false)
     }
-  }
+
+    fetchProfile()
+  }, [router, toast])
 
   const handleLogout = async () => {
-    try {
-      await supabase.auth.signOut()
-      router.push('/')
-    } catch (error) {
-      console.error('Fehler beim Abmelden', error)
+    const { error } = await supabase.auth.signOut()
+    if (error) {
       toast({
         title: "Fehler",
         description: "Abmeldung fehlgeschlagen.",
         variant: "destructive",
       })
+    } else {
+      router.push('/login')
     }
   }
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    try {
-      if (!event.target.files || event.target.files.length === 0) {
-        throw new Error('Sie müssen ein Bild auswählen zum Hochladen.')
+    const file = event.target.files?.[0]
+    if (file) {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const fileExt = file.name.split('.').pop()
+        const fileName = `${user.id}-${Math.random()}.${fileExt}`
+        const { error } = await supabase.storage
+          .from('avatars')
+          .upload(fileName, file)
+
+        if (error) {
+          toast({
+            title: "Fehler",
+            description: "Profilbild konnte nicht hochgeladen werden.",
+            variant: "destructive",
+          })
+        } else {
+          const { data } = supabase.storage
+            .from('avatars')
+            .getPublicUrl(fileName)
+
+          if (data) {
+            setAvatarUrl(data.publicUrl)
+            await supabase
+              .from('profiles')
+              .update({ avatar_url: data.publicUrl })
+              .eq('id', user.id)
+          }
+        }
       }
-
-      const file = event.target.files[0]
-      const fileExt = file.name.split('.').pop()
-      const fileName = `${userId}-${Math.random()}.${fileExt}`
-      const filePath = `avatars/${fileName}`
-
-      setIsSaving(true)
-
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(filePath, file)
-
-      if (uploadError) {
-        throw uploadError
-      }
-
-      const { data } = await supabase.storage
-        .from('avatars')
-        .getPublicUrl(filePath)
-
-      if (!data || !data.publicUrl) {
-        throw new Error('Fehler beim Abrufen der öffentlichen URL')
-      }
-
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ avatar_url: data.publicUrl })
-        .eq('id', userId)
-
-      if (updateError) {
-        throw updateError
-      }
-
-      setAvatarUrl(data.publicUrl)
-      toast({
-        title: "Erfolg",
-        description: "Profilbild wurde aktualisiert.",
-      })
-    } catch (error) {
-      console.error('Fehler beim Aktualisieren des Profilbildes', error)
-      toast({
-        title: "Fehler",
-        description: "Profilbild konnte nicht aktualisiert werden.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSaving(false)
     }
   }
 
+  const validateName = (name: string) => {
+    if (name.length < 2) {
+      setNameError("Der Name muss mindestens 2 Zeichen lang sein.")
+      return false
+    }
+    if (name.length > 50) {
+      setNameError("Der Name darf nicht länger als 50 Zeichen sein.")
+      return false
+    }
+    setNameError("")
+    return true
+  }
+
   const updateProfile = async () => {
-    if (userId) {
-      try {
-        setIsSaving(true)
-        const { error } = await supabase
-          .from('profiles')
-          .update({ name })
-          .eq('id', userId)
+    if (!validateName(name)) return
 
-        if (error) throw error
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ name })
+        .eq('id', user.id)
 
-        toast({
-          title: "Erfolg",
-          description: "Profil wurde erfolgreich gespeichert.",
-        })
-      } catch (error) {
-        console.error('Fehler beim Aktualisieren des Profils', error)
+      if (error) {
         toast({
           title: "Fehler",
           description: "Profil konnte nicht aktualisiert werden.",
           variant: "destructive",
         })
-      } finally {
-        setIsSaving(false)
+      } else {
+        toast({
+          title: "Erfolg",
+          description: "Profil wurde erfolgreich aktualisiert.",
+        })
         setIsEditing(false)
       }
     }
   }
 
   if (isLoading) {
-    return <div>Laden...</div>
+    return <div className="flex justify-center items-center h-screen">Laden...</div>
   }
 
   return (
@@ -186,7 +167,7 @@ export default function ProfilPage() {
         <CardContent className="space-y-4">
           <div className="flex items-center space-x-4">
             <Avatar className="h-20 w-20">
-              <AvatarImage src={avatarUrl || undefined} alt={name} />
+              <AvatarImage src={avatarUrl} alt={name} />
               <AvatarFallback>{name.charAt(0)}</AvatarFallback>
             </Avatar>
             <div>
@@ -196,13 +177,9 @@ export default function ProfilPage() {
                 onChange={handleAvatarUpload}
                 className="hidden"
                 id="avatar-upload"
-                disabled={isSaving}
               />
-              <Button asChild disabled={isSaving}>
-                <label htmlFor="avatar-upload" className="cursor-pointer">
-                  <Upload className="h-4 w-4 mr-2" />
-                  {isSaving ? 'Wird hochgeladen...' : 'Profilbild ändern'}
-                </label>
+              <Button asChild>
+                <label htmlFor="avatar-upload">Profilbild ändern</label>
               </Button>
             </div>
           </div>
@@ -212,9 +189,13 @@ export default function ProfilPage() {
             <Input
               id="name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value)
+                validateName(e.target.value)
+              }}
               disabled={!isEditing}
             />
+            {nameError && <p className="text-red-500 text-sm">{nameError}</p>}
           </div>
 
           <div className="space-y-2">
@@ -227,15 +208,11 @@ export default function ProfilPage() {
             <p>{points}</p>
           </div>
 
-          <Button 
-            onClick={isEditing ? updateProfile : () => setIsEditing(true)} 
-            disabled={isSaving}
-          >
-            {isEditing 
-              ? (isSaving ? 'Wird gespeichert...' : 'Profil speichern')
-              : 'Profil bearbeiten'
-            }
-          </Button>
+          {isEditing ? (
+            <Button onClick={updateProfile} disabled={!!nameError}>Profil speichern</Button>
+          ) : (
+            <Button onClick={() => setIsEditing(true)}>Profil bearbeiten</Button>
+          )}
         </CardContent>
       </Card>
     </div>
