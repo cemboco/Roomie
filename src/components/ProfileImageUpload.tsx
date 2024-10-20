@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
@@ -13,7 +13,7 @@ export function ProfileImageUpload({ userId, url, onUpload }: ProfileImageUpload
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function uploadAvatar(event: React.ChangeEvent<HTMLInputElement>) {
+  const uploadAvatar = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     try {
       setUploading(true)
       setError(null)
@@ -26,7 +26,7 @@ export function ProfileImageUpload({ userId, url, onUpload }: ProfileImageUpload
       const fileExt = file.name.split('.').pop()
       const filePath = `${userId}/${Math.random()}.${fileExt}`
 
-      let { error: uploadError } = await supabase.storage
+      const { error: uploadError } = await supabase.storage
         .from('profile-images')
         .upload(filePath, file)
 
@@ -41,9 +41,9 @@ export function ProfileImageUpload({ userId, url, onUpload }: ProfileImageUpload
     } finally {
       setUploading(false)
     }
-  }
+  }, [userId, onUpload])
 
-  async function deleteAvatar() {
+  const deleteAvatar = useCallback(async () => {
     try {
       setUploading(true)
       setError(null)
@@ -67,7 +67,7 @@ export function ProfileImageUpload({ userId, url, onUpload }: ProfileImageUpload
     } finally {
       setUploading(false)
     }
-  }
+  }, [url, onUpload])
 
   return (
     <div className="flex flex-col items-center">
@@ -82,24 +82,22 @@ export function ProfileImageUpload({ userId, url, onUpload }: ProfileImageUpload
         </Avatar>
       )}
       {error && (
-        <p className="text-red-500 text-sm mt-2">{error}</p>
+        <p className="text-red-500 text-sm mt-2" role="alert">{error}</p>
       )}
       <div className="mt-4 flex space-x-2">
         <Button disabled={uploading} asChild>
-          <label htmlFor="avatar-upload">
+          <label htmlFor="avatar-upload" className="cursor-pointer">
             {uploading ? 'Hochladen ...' : 'Profilbild hochladen'}
           </label>
         </Button>
         <input
           id="avatar-upload"
-          style={{
-            position: 'absolute',
-            visibility: 'hidden'
-          }}
+          className="sr-only"
           type="file"
           accept="image/*"
           onChange={uploadAvatar}
           disabled={uploading}
+          aria-label="Profilbild hochladen"
         />
         {url && (
           <Button variant="destructive" onClick={deleteAvatar} disabled={uploading}>
