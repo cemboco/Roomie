@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CheckCircle, MessageCircle, ShoppingCart, Users } from "lucide-react"
 import Link from "next/link"
-import { supabase } from '@/components/lib/supabase'
+import { supabase } from '@/lib/supabase'
 
 function ForgotPasswordComponent({ onBack }: { onBack: () => void }) {
   const [email, setEmail] = useState("")
